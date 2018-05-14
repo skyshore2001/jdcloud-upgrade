@@ -403,24 +403,31 @@ upgrade.php
 
 require_once('upglib.php');
 
-$h = new UpgHelper();
+global $h;
+try {
+	$h = new UpgHelper();
 
-if (count($argv) > 1) {
-	$cmd = join(' ', array_slice($argv, 1));
-	execCmd($cmd);
-	return;
+	if (count($argv) > 1) {
+		$cmd = join(' ', array_slice($argv, 1));
+		execCmd($cmd);
+		return;
+	}
+
+	while (true) {
+		echo "> ";
+		$s = fgets(STDIN);
+		if ($s === false)
+			break;
+		$s = chop($s);
+		if (! $s)
+			continue;
+
+		execCmd($s);
+	}
 }
-
-while (true) {
-	echo "> ";
-	$s = fgets(STDIN);
-	if ($s === false)
-		break;
-	$s = chop($s);
-	if (! $s)
-		continue;
-
-	execCmd($s);
+catch (Exception $e) {
+	echo($e->getMessage());
+	echo("\n");
 }
 
 function execCmd($cmd)
@@ -458,7 +465,7 @@ function execCmd($cmd)
 		}
 	}
 	catch (Exception $e) {
-		echo($e);
+		echo($e->getMessage());
 		echo("\n");
 	}
 }

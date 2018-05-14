@@ -369,6 +369,25 @@ class UpgHelper
 			prompt("=== Done! Find log in $LOGF\n");
 	}
 
+	// 添加文件到$files集合。
+	private function includeFile($f, &$files) {
+		if (strpos($f, "*") === false) {
+			if (! file_exists($f)) {
+				logstr("!!! cannot read included file $f\n");
+				return;
+			}
+			$fi = new SplFileInfo($f);
+			$f1 = $fi->getRealPath();
+			if (array_search($f1, $files) === false)
+				$files[] = $f1;
+		}
+		else {
+			foreach (glob($f) as $e) {
+				$this->includeFile($e, $files);
+			}
+		}
+	}
+
 	# init meta and DB conn
 	private function _initMeta()
 	{
@@ -380,7 +399,9 @@ class UpgHelper
 
 		$baseDir = dirname($meta);
 		$files = [$meta];
-		while ($file = array_pop($files)) {
+		for ($i=0; $i<count($files); ++$i) {
+			$fi = new SplFileInfo($files[$i]);
+			$file = $fi->getRealPath();
 
 			//$file = iconv("utf-8", "gbk", $METAFILE); // for OS windows
 			$fd = fopen($file, "r");
@@ -389,24 +410,20 @@ class UpgHelper
 
 			while (($s = fgets($fd)) !== false) {
 				if (preg_match('/^@(\w+):\s+(\w.*?)\s*$/', $s, $ms)) {
-					$this->tableMeta[] = ["name"=>$ms[1], "fields"=>preg_split('/\s*,\s*/', $ms[2])];
+					$tableName = $ms[1];
+					foreach ($this->tableMeta as $e) {
+						if ($e["name"] == $tableName) {
+							logstr("!!! `@{$tableName}' is redefined in file `$file', previous defined in file `{$e['file']}'.\n");
+							continue;
+						}
+					}
+					$this->tableMeta[] = ["name"=>$ms[1], "fields"=>preg_split('/\s*,\s*/', $ms[2]), "file"=>$file];
 		# 			print "-- $_";
 		# 			print genSql($tbl, $fields) . "\n";
 				}
 				elseif (preg_match('/^@include\s+(\S+)/', $s, $ms)) {
 					$f = $baseDir . '/' . $ms[1];
-					if (strpos($f, "*") === false) {
-						if (! file_exists($f))
-							throw new Exception("*** cannot read included file $f");
-						if (array_search($f, $files) === false)
-							$files[] = $f;
-					}
-					else {
-						foreach (glob($f) as $e) {
-							if (array_search($e, $files) === false)
-								$files[] = $e;
-						}
-					}
+					$this->includeFile($f, $files);
 				}
 				elseif (preg_match('/^@ver=(\d+)/', $s, $ms))
 				{
