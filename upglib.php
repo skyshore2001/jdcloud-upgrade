@@ -99,25 +99,74 @@ function die1($msg)
 	exit(1);
 }
 
-function genColSql($fieldDef)
+function arrayCmp($a1, $a2, $fnEq, $cb)
+{
+	$mark = []; // index_of_a2 => true
+	foreach ($a1 as $e1) {
+		$found = null;
+		for ($i=0; $i<count($a2); ++$i) {
+			$e2 = $a2[$i];
+			if ($fnEq($e1, $e2)) {
+				$found = $e2;
+				$mark[$i] = true;
+				break;
+			}
+		}
+		$cb($e1, $found);
+	}
+	for ($i=0; $i<count($a2); ++$i) {
+		if (! array_key_exists($i, $mark)) {
+			$cb(null, $a2[$i]);
+		}
+	}
+}
+ 
+/*
+
+@return: ["name", "dscr", "def", "type", "len"]
+
+@key: FIELD_META_TYPE
+
+- name: 字段名，如"cmt".
+- dscr: 原始定义，如"cmt(l)"。
+- def: 字段生成的SQL语句
+- type: Enum("id", "nvarchar", "ntext", "int", "real", "decimal", "date", "datetime", "flag")
+- len: 仅当type="nvarchar"时有意义，表示字串长。
+
+e.g.
+
+	"cmt(l)" => ["name"=>"cmt", "def"=>"cmt(l)", "type=>"nvarchar", "len"=>250];
+*/
+function parseFieldDef($fieldDef)
 {
 	global $CHAR_SZ, $SQLDIFF;
 	$f = $fieldDef;
 	$f1 = ucfirst(preg_replace('/(\d|\W)*$/', '', $f));
-	$def = '';
+
+	$ret = [
+		"name" => null,
+		"dscr" => $fieldDef,
+		"type" => "nvarchar",
+		"len" => null,
+		"def" => null
+	];
 	if ($f == 'id') {
+		$ret["type"] = "id";
 		$def = "INTEGER PRIMARY KEY " . $SQLDIFF->autoInc;
 	}
 	elseif (preg_match('/\((\w+)\)$/', $f, $ms)) {
 		$tag = $ms[1];
 		$f = preg_replace('/\((\w+)\)$/', '', $f);
 		if ($tag == 't') {
+			$ret["type"] = "ntext";
 			$def = $SQLDIFF->ntext;
 		}
 		elseif ($tag == 's' || $tag == 'm' || $tag == 'l') {
+			$ret["len"] = $CHAR_SZ[$tag];
 			$def = "NVARCHAR(" . $CHAR_SZ[$tag] . ")";
 		}
 		elseif (is_numeric($tag)) {
+			$ret["len"] = $tag;
 			$def = "NVARCHAR($tag)";
 		}
 		else {
@@ -126,29 +175,43 @@ function genColSql($fieldDef)
 	}
 	elseif (preg_match('/(@|&|#)$/', $f, $ms)) {
 		$f = substr_replace($f, "", -1);
-		if ($ms[1] == '@')
+		if ($ms[1] == '@') {
+			$ret["type"] = "decimal";
+			$ret["len"] = "19,2";
 			$def = $SQLDIFF->money;
-		else if ($ms[1] == '&')
+		}
+		else if ($ms[1] == '&') {
+			$ret["type"] = "int";
 			$def = "INTEGER";
-		else if ($ms[1] == '#')
+		}
+		else if ($ms[1] == '#') {
+			$ret["type"] = "real";
 			$def = "REAL";
+		}
 	}
 	elseif (preg_match('/(Price|Qty|Total|Amount)$/', $f1)) {
+		$ret["type"] = "decimal";
+		$ret["len"] = "19,2";
 		$def = $SQLDIFF->money;
 	}
 	elseif (preg_match('/Id$/', $f1)) {
+		$ret["type"] = "int";
 		$def = "INTEGER";
 	}
 	elseif (preg_match('/Tm$/', $f1)) {
+		$ret["type"] = "datetime";
 		$def = "DATETIME";
 	}
 	elseif (preg_match('/Dt$/', $f1)) {
+		$ret["type"] = "date";
 		$def = "DATE";
 	}
 	elseif (preg_match('/Flag$/', $f1)) {
+		$ret["type"] = "flag";
 		$def = "TINYINT UNSIGNED NOT NULL DEFAULT 0";
 	}
 	elseif (preg_match('/^\w+$/', $f)) { # default
+		$ret["len"] = $CHAR_SZ['m'];
 		$def = "NVARCHAR(" . $CHAR_SZ['m'] . ")";
 	}
 	else {
@@ -159,7 +222,16 @@ function genColSql($fieldDef)
 # 		if ($f == 'desc') {
 # 			$f .= '1';
 # 		}
-	return "$f $def";
+	$ret["def"] = $def;
+	$ret["name"] = $f;
+	//return "$f $def";
+	return $ret;
+}
+
+// $fieldDef: ref to FIELD_META_TYPE
+function genColSql($fieldDef)
+{
+	return $fieldDef["name"] . " " . $fieldDef["def"];
 }
 
 # ret: $sql
@@ -169,7 +241,7 @@ function genSql($meta)
 	$table = $SQLDIFF->safeName($meta['name']);
 	$sql = "CREATE TABLE $table (";
 	$n = 0;
-	foreach ($meta["fields"] as $f) {
+	foreach ($meta["fieldsMeta"] as $f) {
 		if (++$n > 1) {
 			$sql .= ", ";
 		}
@@ -417,7 +489,9 @@ class UpgHelper
 							continue;
 						}
 					}
-					$this->tableMeta[] = ["name"=>$ms[1], "fields"=>preg_split('/\s*,\s*/', $ms[2]), "file"=>$file];
+					$fields = preg_split('/\s*,\s*/', $ms[2]);
+					// fieldsMeta在SQL_DIFF初始化后再设置.
+					$this->tableMeta[] = ["name"=>$ms[1], "fields"=>$fields, "fieldsMeta"=>null, "file"=>$file];
 		# 			print "-- $_";
 		# 			print genSql($tbl, $fields) . "\n";
 				}
@@ -455,6 +529,13 @@ class UpgHelper
 		}
 		global $SQLDIFF;
 		$SQLDIFF = SqlDiff::create($this->dbh);
+		foreach ($this->tableMeta as &$e) {
+			$fieldsMeta = array_map(function ($e) {
+				return parseFieldDef($e);
+			}, $e["fields"]);
+			$e["fieldsMeta"] = $fieldsMeta;
+		}
+
 		try {
 			$sth = $this->dbh->query('SELECT ver FROM cinf');
 			$this->dbver = $sth->fetchColumn();
@@ -492,16 +573,22 @@ class UpgHelper
 	}
 
 	/** @api */
-	function showTable($tbl = "*")
+	function showTable($tbl = "*", $checkDb = false)
 	{
+		global $SQLDIFF;
 		$found = false;
 		foreach ($this->tableMeta as $meta) {
 			if (! fnmatch($tbl, $meta["name"], FNM_CASEFOLD))
 				continue;
+
+			$found = true;
+			if ($checkDb && $SQLDIFF->tableExists($meta["name"])) {
+				$this->alterTable($meta["name"], $meta);
+				continue;
+			}
 			echo("-- {$meta['name']}: " . join(',', $meta['fields']) . "\n");
 			$sql = genSql($meta);
 			echo("$sql\n");
-			$found = true;
 		}
 		if (!$found) {
 			logstr("!!! cannot find table $tbl\n");
@@ -515,6 +602,59 @@ class UpgHelper
 		$sql = "ALTER TABLE $tableName ADD " . genColSql($fieldMeta);
 		logstr("-- $sql\n");
 		$rv = $this->dbh->exec($sql);
+	}
+
+	// meta: {type, len, ...} 参考 FIELD_META_TYPE
+	private function fieldEqual($meta, $dbType)
+	{
+		$len = 0;
+		if (preg_match('/(\w+)\((.*?)\)/', $dbType, $ms)) {
+			$dbType = $ms[1];
+			$len = $ms[2];
+		}
+
+		switch($meta["type"]) {
+		case "nvarchar":
+			return $dbType == "varchar" && $len == $meta["len"];
+		case "ntext":
+			return $dbType == "text";
+		case "int":
+		case "id":
+			return $dbType == "int";
+		case "flag":
+			return $dbType == "tinyint";
+		case "decimal":
+			return $dbType == "decimal" && $len == $meta["len"];
+		default:
+			return $meta["type"] == $dbType;
+		}
+	}
+
+	// 只输出SQL, 不直接改表.
+	private function alterTable($table, $tableMeta)
+	{
+		global $SQLDIFF;
+		$sth = $this->dbh->query("desc `$table`"); 
+		$dbFields = $sth->fetchAll(\PDO::FETCH_ASSOC); // elem={Field, Type, Null, Key, ...}
+
+		$tableName = $SQLDIFF->safeName($tableMeta["name"]);
+		arrayCmp($tableMeta["fieldsMeta"], $dbFields, function ($meta, $dbField) {
+			return $meta["name"] === $dbField["Field"];
+		}, function ($meta, $dbField) use ($tableName) { // meta: {type, len, ...} 参考 FIELD_META_TYPE
+			if ($meta === null) {
+				$sql = "ALTER TABLE $tableName DROP " . $dbField["Field"];
+				echo("$sql;\n");
+			}
+			else if ($dbField === null) {
+				$sql = "ALTER TABLE $tableName ADD " . genColSql($meta);
+				echo("$sql;\n");
+			}
+			else if (! $this->fieldEqual($meta, $dbField["Type"])) {
+				echo(sprintf("-- %s: OLD=%s\n", $meta["dscr"], $dbField["Type"]));
+				$sql = sprintf("ALTER TABLE $tableName MODIFY %s", genColSql($meta));
+				echo("$sql;\n");
+			}
+		});
 	}
 
 	private function _addTableByMeta($tableMeta, $force = false)
@@ -531,13 +671,11 @@ class UpgHelper
 				$row = $rs[0];
 				$found = false;
 
-				foreach ($tableMeta["fields"] as $f) {
-					if (preg_match('/\w+/', $f, $ms)) {
-						$fieldName = $ms[0];
-						if (! array_key_exists($fieldName, $row)) {
-							$found = true;
-							$this->_addColByMeta($tbl, $f);
-						}
+				foreach ($tableMeta["fieldsMeta"] as $fieldMeta) {
+					$fieldName = $fieldMeta["name"];
+					if (! array_key_exists($fieldName, $row)) {
+						$found = true;
+						$this->_addColByMeta($tbl, $fieldMeta);
 					}
 				}
 				return $found;
@@ -857,14 +995,11 @@ class UpgHelper
 			if (strcasecmp($e["name"], $table) != 0)
 				continue;
 			$n = strlen($col);
-			foreach ($e["fields"] as $f) {
+			foreach ($e["fieldsMeta"] as $fieldMeta) {
+				$f = $fieldMeta["name"];
 				if (strncasecmp($f, $col, $n) != 0)
 					continue;
-				if (strlen($f) > $n) {
-					if (! preg_match('/^\W$/', $f[$n]))
-						continue;
-				}
-				$this->_addColByMeta($e["name"], $f);
+				$this->_addColByMeta($e["name"], $fieldMeta);
 				$found = true;
 				break;
 			}

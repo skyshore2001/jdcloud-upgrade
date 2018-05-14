@@ -40,6 +40,16 @@
 
 	./upgrade.sh showtable
 
+要查看指定的表:
+
+	./upgrade.sh showtable("ordr")
+
+默认升级时(initdb)只会添加缺失的表和字段, 不会更新已有的表和字段, 但可以用
+
+	./upgrade.sh showtable("*", true)	
+
+导出SQL后, 手工编辑并执行, 以避免误修改或删除字段.
+
 ## 定义数据模型
 
 数据模型主要为表和字段，一般在设计文档中定义，最常见的形式如：
@@ -130,8 +140,7 @@ P_DBTYPE参数可以不设置，它默认值就是mysql。
 注意：
 
 - 升级工具只创建表, 不创建数据库本身。
-- TODO: 不会删除表或字段。如有需要请手工操作。
-- TODO: 对已有的字段，不能修改字段类型。需要手工操作。
+- 默认不会删除表或字段, 不会更新类型与定义不一致的字段。如有需要可用`showtable("*", true)`命令导出SQL并手工操作。
 
 ### 筋斗云框架支持
 
@@ -219,14 +228,17 @@ TODO
 
 **[showtable]**
 
-参数: {table?="*"}
+参数: {table?="*", checkDb=false}
 
 查看某表的metadata以及SQL创建语句. 参数{table}中可以包含通配符。
+如果参数{checkDb}=true, 则以SQL命令(如ALTER TABLE语句)方式输出数据模型定义与实际数据库表的差异, 它不会自动执行, 以避免误修改或删除字段, 可由用户导出SQL编辑后手工执行.
 
 例: 
 
 	> showtable("item")
 	> showtable("*log")
+
+	> showtable("*", true)
 
 **[addtable]**
 
