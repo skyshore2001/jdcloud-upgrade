@@ -393,6 +393,9 @@ function dbconn($fnConfirm = null)
 			list($dbuser, $dbpwd) = getCred($DBCRED); 
 			$C = ["mysql:host={$dbhost};dbname={$dbname};port={$dbport}", $dbuser, $dbpwd];
 		}
+		else {
+			throw new Exception("bad DB spec for dbtype=$DBTYPE");
+		}
 	}
 	else {
 		list($dbuser, $dbpwd) = getCred($DBCRED); 
@@ -633,6 +636,10 @@ class UpgHelper
 	// 只输出SQL, 不直接改表.
 	private function alterTable($table, $tableMeta)
 	{
+		global $DBTYPE;
+		if ($DBTYPE != "mysql")
+			throw new Exception("*** check table supports only mssql database!");
+
 		global $SQLDIFF;
 		$sth = $this->dbh->query("desc `$table`"); 
 		$dbFields = $sth->fetchAll(\PDO::FETCH_ASSOC); // elem={Field, Type, Null, Key, ...}

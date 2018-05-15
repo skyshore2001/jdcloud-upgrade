@@ -42,11 +42,11 @@
 
 要查看指定的表:
 
-	./upgrade.sh showtable("ordr")
+	./upgrade.sh 'showtable("ordr")'
 
 默认升级时(initdb)只会添加缺失的表和字段, 不会更新已有的表和字段, 但可以用
 
-	./upgrade.sh showtable("*", true)	
+	./upgrade.sh 'showtable("*", true)' | tee 1.sql
 
 导出SQL后, 手工编辑并执行, 以避免误修改或删除字段.
 
